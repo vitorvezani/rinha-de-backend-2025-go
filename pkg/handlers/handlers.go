@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/vitorvezani/rinha-de-backend-2025/pkg/processor"
+	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/processor"
 )
 
 func HandlePaymentsSummary(db *sql.DB) func(c *gin.Context) {

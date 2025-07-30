@@ -1,4 +1,4 @@
-module github.com/vitorvezani/rinha-de-backend-2025
+module github.com/vitorvezani/rinha-de-backend-2025-go
 
 go 1.24.1
 

@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/vitorvezani/rinha-de-backend-2025/pkg/handlers"
-	"github.com/vitorvezani/rinha-de-backend-2025/pkg/processor"
+	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/handlers"
+	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/processor"
 	_ "modernc.org/sqlite"
 )
 
