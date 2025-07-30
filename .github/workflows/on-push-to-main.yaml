@@ -1,9 +1,9 @@
-name: 🚀 On push to main  
+name: 🚀 On push to master  
 
 on:
   push:
     branches:
-      - main
+      - master
 
 permissions:
   contents: read
