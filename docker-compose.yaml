@@ -1,6 +1,6 @@
 services:
   api: &api
-    image: vitorvezani/rinha-backend-2025-go:latest
+    image: ghcr.io/vitorvezani/rinha-de-backend-2025-go:latest
     hostname: api
     environment:
       - APP_PORT=9999
