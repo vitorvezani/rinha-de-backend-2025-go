@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -46,12 +47,12 @@ func (pp *PaymentProcessor) IsAvailable() bool {
 }
 
 type PaymentClient interface {
-	MakePayment(payment Payment) (string, error)
-	GetHealth() (*HealthResponse, error)
-	GetPayment(id int64) (*Payment, error)
-	GetAdminPaymentsSummary(from, to time.Time) (*PaymentsSummary, error)
-	SetAdminConfigToken(token string) error
-	SetAdminConfigDelay(delay int64) error
-	SetAdminConfigFailure(failure bool) error
-	SetAdminPurgePayments() error
+	MakePayment(ctx context.Context, payment Payment) (string, error)
+	GetHealth(ctx context.Context) (*HealthResponse, error)
+	GetPayment(ctx context.Context, id int64) (*Payment, error)
+	GetAdminPaymentsSummary(ctx context.Context, from, to time.Time) (*PaymentsSummary, error)
+	SetAdminConfigToken(ctx context.Context, token string) error
+	SetAdminConfigDelay(ctx context.Context, delay int64) error
+	SetAdminConfigFailure(ctx context.Context, failure bool) error
+	SetAdminPurgePayments(ctx context.Context) error
 }

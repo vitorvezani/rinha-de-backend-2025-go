@@ -60,6 +60,6 @@ func main() {
 	router := gin.Default()
 	router.POST("/payments", handlers.HandlePaymentProcessor(rdb, defaultProcessor, fallbackProcessor))
 	router.GET("/payments-summary", handlers.HandlePaymentsSummary(rdb))
-	router.POST("/purge-payments", handlers.HandlePurgePayments())
+	router.POST("/purge-payments", handlers.HandlePurgePayments(rdb))
 	router.Run(":" + port)
 }

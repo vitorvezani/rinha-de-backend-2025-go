@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -39,11 +40,12 @@ func (rc *RestClient) SetAuthToken(token string) {
 }
 
 // MakePayment sends a payment request
-func (rc *RestClient) MakePayment(payment Payment) (string, error) {
+func (rc *RestClient) MakePayment(ctx context.Context, payment Payment) (string, error) {
 	var resp struct {
 		Message string `json:"message"`
 	}
 	response, err := rc.client.R().
+		SetContext(ctx).
 		SetBody(payment).
 		SetResult(&resp).
 		Post(fmt.Sprintf("%s/payments", rc.baseURL))
@@ -59,9 +61,10 @@ func (rc *RestClient) MakePayment(payment Payment) (string, error) {
 }
 
 // GetHealth checks service health
-func (rc *RestClient) GetHealth() (*HealthResponse, error) {
+func (rc *RestClient) GetHealth(ctx context.Context) (*HealthResponse, error) {
 	var health HealthResponse
 	response, err := rc.client.R().
+		SetContext(ctx).
 		SetResult(&health).
 		Get(fmt.Sprintf("%s/payments/service-health", rc.baseURL))
 
@@ -72,9 +75,10 @@ func (rc *RestClient) GetHealth() (*HealthResponse, error) {
 }
 
 // GetPayment retrieves a payment by ID
-func (rc *RestClient) GetPayment(id int64) (*Payment, error) {
+func (rc *RestClient) GetPayment(ctx context.Context, id int64) (*Payment, error) {
 	var payment Payment
 	response, err := rc.client.R().
+		SetContext(ctx).
 		SetResult(&payment).
 		Get(fmt.Sprintf("%s/payments/%d", rc.baseURL, id))
 	if response.IsError() {
@@ -84,9 +88,10 @@ func (rc *RestClient) GetPayment(id int64) (*Payment, error) {
 }
 
 // GetAdminPaymentsSummary fetches payments summary between dates
-func (rc *RestClient) GetAdminPaymentsSummary(from, to time.Time) (*PaymentsSummary, error) {
+func (rc *RestClient) GetAdminPaymentsSummary(ctx context.Context, from, to time.Time) (*PaymentsSummary, error) {
 	var summary PaymentsSummary
 	response, err := rc.client.R().
+		SetContext(ctx).
 		SetQueryParams(map[string]string{
 			"from": from.Format(time.RFC3339),
 			"to":   to.Format(time.RFC3339),
@@ -101,9 +106,10 @@ func (rc *RestClient) GetAdminPaymentsSummary(from, to time.Time) (*PaymentsSumm
 }
 
 // SetAdminConfigToken sets admin token
-func (rc *RestClient) SetAdminConfigToken(token string) error {
+func (rc *RestClient) SetAdminConfigToken(ctx context.Context, token string) error {
 	body := map[string]string{"token": token}
 	response, err := rc.client.R().
+		SetContext(ctx).
 		SetBody(body).
 		Post(fmt.Sprintf("%s/admin/config/token", rc.baseURL))
 
@@ -115,9 +121,10 @@ func (rc *RestClient) SetAdminConfigToken(token string) error {
 }
 
 // SetAdminConfigDelay sets admin delay
-func (rc *RestClient) SetAdminConfigDelay(delay int64) error {
+func (rc *RestClient) SetAdminConfigDelay(ctx context.Context, delay int64) error {
 	body := map[string]int64{"delay": delay}
 	response, err := rc.client.R().
+		SetContext(ctx).
 		SetBody(body).
 		Post(fmt.Sprintf("%s/admin/config/delay", rc.baseURL))
 	if response.IsError() {
@@ -127,9 +134,10 @@ func (rc *RestClient) SetAdminConfigDelay(delay int64) error {
 }
 
 // SetAdminConfigFailure toggles admin failure
-func (rc *RestClient) SetAdminConfigFailure(failure bool) error {
+func (rc *RestClient) SetAdminConfigFailure(ctx context.Context, failure bool) error {
 	body := map[string]bool{"failure": failure}
 	response, err := rc.client.R().
+		SetContext(ctx).
 		SetBody(body).
 		Post(fmt.Sprintf("%s/admin/config/failure", rc.baseURL))
 
@@ -141,8 +149,9 @@ func (rc *RestClient) SetAdminConfigFailure(failure bool) error {
 }
 
 // SetAdminPurgePayments purges all payments
-func (rc *RestClient) SetAdminPurgePayments() error {
+func (rc *RestClient) SetAdminPurgePayments(ctx context.Context) error {
 	response, err := rc.client.R().
+		SetContext(ctx).
 		Post(fmt.Sprintf("%s/admin/payments", rc.baseURL))
 
 	if response.IsError() {

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -32,10 +31,8 @@ func HandlePaymentsSummary(rdb *redis.Client) func(c *gin.Context) {
 
 		fmt.Printf("Received handlePaymentsSummary from %s to %s\n", from, to)
 
-		ctx := context.Background()
-
 		// Get all payment keys
-		keys, err := rdb.Keys(ctx, "payment:*").Result()
+		keys, err := rdb.Keys(c.Request.Context(), "payment:*").Result()
 		if err != nil {
 			log.Println("Error getting payment keys:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
@@ -55,7 +52,7 @@ func HandlePaymentsSummary(rdb *redis.Client) func(c *gin.Context) {
 		}
 
 		for _, key := range keys {
-			paymentData, err := rdb.HGetAll(ctx, key).Result()
+			paymentData, err := rdb.HGetAll(c.Request.Context(), key).Result()
 			if err != nil {
 				log.Println("Error getting payment data:", err)
 				continue
@@ -113,7 +110,7 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 
 		if defaultProcessor.IsAvailable() {
 			processorUsed = defaultProcessor.Name
-			_, err = defaultProcessor.Client.MakePayment(paymentRequest)
+			_, err = defaultProcessor.Client.MakePayment(c.Request.Context(), paymentRequest)
 		} else {
 			err = fmt.Errorf("default processor is not available")
 		}
@@ -121,7 +118,7 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 			log.Println("error in default processor, falling back to fallback processor", err)
 			if fallbackProcessor.IsAvailable() {
 				processorUsed = fallbackProcessor.Name
-				_, err = fallbackProcessor.Client.MakePayment(paymentRequest)
+				_, err = fallbackProcessor.Client.MakePayment(c.Request.Context(), paymentRequest)
 				if err != nil {
 					log.Println("error in fallback processor, erroring out", err)
 					c.JSON(http.StatusFailedDependency, "could not make payment")
@@ -135,7 +132,6 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 			}
 		}
 
-		ctx := context.Background()
 		paymentKey := fmt.Sprintf("payment:%s", body.CorrelationId)
 
 		// Store payment data as a hash in Redis
@@ -146,7 +142,7 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 			"created_at":      time.Now().Format(time.RFC3339),
 		}
 
-		err = rdb.HMSet(ctx, paymentKey, paymentData).Err()
+		err = rdb.HMSet(c.Request.Context(), paymentKey, paymentData).Err()
 		if err != nil {
 			log.Println("error storing payment in Redis", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
@@ -159,8 +155,27 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 	}
 }
 
-func HandlePurgePayments() func(c *gin.Context) {
+func HandlePurgePayments(rdb *redis.Client) func(c *gin.Context) {
 	return func(c *gin.Context) {
+		// Get all payment keys
+		keys, err := rdb.Keys(c.Request.Context(), "payment:*").Result()
+		if err != nil {
+			log.Println("Error getting payment keys for purge:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+
+		// Delete all payment keys if any exist
+		if len(keys) > 0 {
+			deleted, err := rdb.Del(c.Request.Context(), keys...).Result()
+			if err != nil {
+				log.Println("Error purging payments:", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+				return
+			}
+			log.Printf("Purged %d payment records", deleted)
+		}
+
 		c.JSON(200, gin.H{
 			"message": "Payments purged!",
 		})
