@@ -2,17 +2,25 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/handlers"
 	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/processor"
-	_ "modernc.org/sqlite"
 )
 
 func main() {
-	db, err := sql.Open("sqlite", "file:payments.db?mode=memory&cache=shared")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbName := os.Getenv("DB_NAME")
+
+	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPassword, dbName)
+	db, err := sql.Open("postgres", psqlInfo)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,14 +63,18 @@ func main() {
 }
 
 func setupDatabase(db *sql.DB) error {
-	_, err := db.Exec("CREATE TABLE payments (correlation_id TEXT PRIMARY KEY, processor TEXT, amount_in_cents INTEGER, created_at TIME WITHOUT TIMEZONE)")
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS payments (
+	   correlation_id TEXT PRIMARY KEY,
+	   processor TEXT,
+	   amount_in_cents INTEGER,
+	   created_at TIMESTAMP WITHOUT TIME ZONE
+   )`)
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec("CREATE INDEX idx_payments_processor_created_at ON payments (processor, created_at)")
+	_, err = db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_processor_created_at ON payments (processor, created_at)")
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
