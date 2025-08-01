@@ -59,6 +59,12 @@ func HandlePaymentsSummary(rdb *redis.Client) func(c *gin.Context) {
 				continue
 			}
 
+			// Skip failed payments
+			status, statusExists := paymentData["status"]
+			if statusExists && status == "failed" {
+				continue
+			}
+
 			createdAtStr, exists := paymentData["created_at"]
 			if !exists {
 				continue
@@ -75,6 +81,12 @@ func HandlePaymentsSummary(rdb *redis.Client) func(c *gin.Context) {
 			}
 
 			processor := paymentData["processor"]
+
+			// Skip payments with no processor or "none" processor (failed payments)
+			if processor == "" || processor == "none" {
+				continue
+			}
+
 			amountStr := paymentData["amount_in_cents"]
 			amount, err := strconv.ParseFloat(amountStr, 64)
 			if err != nil {
@@ -187,7 +199,7 @@ func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, de
 	maxRetries := 5
 	retryDelay := time.Second * 2
 
-	for attempt := range maxRetries {
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		var processorUsed string
 		var err error
 
@@ -198,10 +210,8 @@ func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, de
 			if err == nil {
 				// Success with default processor
 				storePaymentResult(rdb, paymentRequest, processorUsed)
-				log.Printf("Payment %s processed successfully with default processor", paymentRequest.CorrelationId)
 				return
 			}
-			log.Printf("Default processor failed for payment %s: %v", paymentRequest.CorrelationId, err)
 		}
 
 		// Try fallback processor
@@ -211,15 +221,11 @@ func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, de
 			if err == nil {
 				// Success with fallback processor
 				storePaymentResult(rdb, paymentRequest, processorUsed)
-				log.Printf("Payment %s processed successfully with fallback processor", paymentRequest.CorrelationId)
 				return
 			}
-			log.Printf("Fallback processor failed for payment %s: %v", paymentRequest.CorrelationId, err)
 		}
 
 		// Both processors failed, log and retry
-		log.Printf("Both processors failed for payment %s (attempt %d/%d)", paymentRequest.CorrelationId, attempt+1, maxRetries)
-
 		if attempt < maxRetries-1 {
 			time.Sleep(retryDelay)
 			retryDelay *= 2 // Exponential backoff
@@ -227,8 +233,26 @@ func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, de
 	}
 
 	// All retries exhausted
-	log.Printf("Payment %s failed after %d attempts - storing as failed", paymentRequest.CorrelationId, maxRetries)
-	go processPaymentAsync(rdb, paymentRequest, defaultProcessor, fallbackProcessor)
+	storeFailedPayment(rdb, paymentRequest)
+}
+
+func storeFailedPayment(rdb *redis.Client, paymentRequest processor.Payment) {
+	paymentKey := fmt.Sprintf("payment:%s", paymentRequest.CorrelationId)
+
+	paymentData := map[string]interface{}{
+		"correlation_id":  paymentRequest.CorrelationId,
+		"processor":       "none",
+		"amount_in_cents": paymentRequest.Amount * 100.0,
+		"created_at":      time.Now().Format(time.RFC3339),
+		"status":          "failed",
+		"retry_count":     5, // Store how many times we retried
+		"failed_at":       time.Now().Format(time.RFC3339),
+	}
+
+	err := rdb.HMSet(context.Background(), paymentKey, paymentData).Err()
+	if err != nil {
+		log.Printf("Error storing failed payment %s in Redis: %v", paymentRequest.CorrelationId, err)
+	}
 }
 
 func storePaymentResult(rdb *redis.Client, paymentRequest processor.Payment, processorUsed string) {
@@ -260,13 +284,12 @@ func HandlePurgePayments(rdb *redis.Client) func(c *gin.Context) {
 
 		// Delete all payment keys if any exist
 		if len(keys) > 0 {
-			deleted, err := rdb.Del(c.Request.Context(), keys...).Result()
+			_, err := rdb.Del(c.Request.Context(), keys...).Result()
 			if err != nil {
 				log.Println("Error purging payments:", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 				return
 			}
-			log.Printf("Purged %d payment records", deleted)
 		}
 
 		c.JSON(200, gin.H{
