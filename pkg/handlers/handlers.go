@@ -1,17 +1,19 @@
 package handlers
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/processor"
 )
 
-func HandlePaymentsSummary(db *sql.DB) func(c *gin.Context) {
+func HandlePaymentsSummary(rdb *redis.Client) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		fromStr := c.Query("from")
 		toStr := c.Query("to")
@@ -30,66 +32,73 @@ func HandlePaymentsSummary(db *sql.DB) func(c *gin.Context) {
 
 		fmt.Printf("Received handlePaymentsSummary from %s to %s\n", from, to)
 
-		query := `
-			SELECT processor, COUNT(*) AS total_requests, SUM(amount_in_cents) AS total_amount
-			FROM payments
-			WHERE created_at BETWEEN $1 AND $2
-			GROUP BY processor
-		`
+		ctx := context.Background()
 
-		rows, err := db.Query(query, from, to)
+		// Get all payment keys
+		keys, err := rdb.Keys(ctx, "payment:*").Result()
 		if err != nil {
-			log.Println("Error querying payments summary:", err)
+			log.Println("Error getting payment keys:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
-		defer rows.Close()
 
 		// Result map
-		result := make(map[string]gin.H)
+		result := map[string]gin.H{
+			"default": {
+				"totalRequests": 0,
+				"totalAmount":   float64(0),
+			},
+			"fallback": {
+				"totalRequests": 0,
+				"totalAmount":   float64(0),
+			},
+		}
 
-		for rows.Next() {
-			var processor string
-			var totalRequests int
-			var totalAmountCents int64
-
-			if err := rows.Scan(&processor, &totalRequests, &totalAmountCents); err != nil {
-				log.Println("Error scanning row:", err)
+		for _, key := range keys {
+			paymentData, err := rdb.HGetAll(ctx, key).Result()
+			if err != nil {
+				log.Println("Error getting payment data:", err)
 				continue
 			}
 
-			// Convert cents to float (e.g., 123456 => 1234.56)
-			result[processor] = gin.H{
-				"totalRequests": totalRequests,
-				"totalAmount":   float64(totalAmountCents) / 100.0,
+			createdAtStr, exists := paymentData["created_at"]
+			if !exists {
+				continue
 			}
-		}
 
-		if len(result["default"]) == 0 {
-			result["default"] = gin.H{
-				"totalRequests": 0,
-				"totalAmount":   float64(0),
+			createdAt, err := time.Parse(time.RFC3339, createdAtStr)
+			if err != nil {
+				continue
 			}
-		}
 
-		if len(result["fallback"]) == 0 {
-			result["fallback"] = gin.H{
-				"totalRequests": 0,
-				"totalAmount":   float64(0),
+			// Check if payment is within date range
+			if createdAt.Before(from) || createdAt.After(to) {
+				continue
 			}
-		}
 
-		if err := rows.Err(); err != nil {
-			log.Println("Rows error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
+			processor := paymentData["processor"]
+			amountStr := paymentData["amount_in_cents"]
+			amount, err := strconv.ParseFloat(amountStr, 64)
+			if err != nil {
+				continue
+			}
+
+			if processorData, exists := result[processor]; exists {
+				totalRequests := processorData["totalRequests"].(int) + 1
+				totalAmount := processorData["totalAmount"].(float64) + (amount / 100.0)
+
+				result[processor] = gin.H{
+					"totalRequests": totalRequests,
+					"totalAmount":   totalAmount,
+				}
+			}
 		}
 
 		c.JSON(http.StatusOK, result)
 	}
 }
 
-func HandlePaymentProcessor(db *sql.DB, defaultProcessor, fallbackProcessor *processor.PaymentProcessor) func(c *gin.Context) {
+func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcessor *processor.PaymentProcessor) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var body processor.Payment
 		err := c.BindJSON(&body)
@@ -126,9 +135,20 @@ func HandlePaymentProcessor(db *sql.DB, defaultProcessor, fallbackProcessor *pro
 			}
 		}
 
-		_, err = db.Exec("INSERT INTO payments (correlation_id, processor, amount_in_cents, created_at) VALUES (? ,?, ? ,?)", body.CorrelationId, processorUsed, body.Amount*100.0, time.Now())
+		ctx := context.Background()
+		paymentKey := fmt.Sprintf("payment:%s", body.CorrelationId)
+
+		// Store payment data as a hash in Redis
+		paymentData := map[string]interface{}{
+			"correlation_id":  body.CorrelationId,
+			"processor":       processorUsed,
+			"amount_in_cents": body.Amount * 100.0,
+			"created_at":      time.Now().Format(time.RFC3339),
+		}
+
+		err = rdb.HMSet(ctx, paymentKey, paymentData).Err()
 		if err != nil {
-			log.Println("error inserting payment into the database", err)
+			log.Println("error storing payment in Redis", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}

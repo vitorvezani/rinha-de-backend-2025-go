@@ -1,34 +1,36 @@
 package main
 
 import (
-	"database/sql"
-	"fmt"
+	"context"
 	"log"
 	"os"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/handlers"
 	"github.com/vitorvezani/rinha-de-backend-2025-go/pkg/processor"
 )
 
 func main() {
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbName := os.Getenv("DB_NAME")
-
-	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPassword, dbName)
-	db, err := sql.Open("postgres", psqlInfo)
-	if err != nil {
-		log.Fatal(err)
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "redis"
 	}
-	defer db.Close()
 
-	err = setupDatabase(db)
+	redisPort := os.Getenv("REDIS_PORT")
+	if redisPort == "" {
+		redisPort = "6379"
+	}
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr: redisHost + ":" + redisPort,
+		DB:   0,
+	})
+
+	ctx := context.Background()
+	_, err := rdb.Ping(ctx).Result()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to connect to Redis:", err)
 	}
 
 	port := os.Getenv("APP_PORT")
@@ -56,25 +58,8 @@ func main() {
 	go processor.InstallPaymentProcessorWatcher(fallbackProcessor)
 
 	router := gin.Default()
-	router.POST("/payments", handlers.HandlePaymentProcessor(db, defaultProcessor, fallbackProcessor))
-	router.GET("/payments-summary", handlers.HandlePaymentsSummary(db))
+	router.POST("/payments", handlers.HandlePaymentProcessor(rdb, defaultProcessor, fallbackProcessor))
+	router.GET("/payments-summary", handlers.HandlePaymentsSummary(rdb))
 	router.POST("/purge-payments", handlers.HandlePurgePayments())
 	router.Run(":" + port)
-}
-
-func setupDatabase(db *sql.DB) error {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS payments (
-	   correlation_id TEXT PRIMARY KEY,
-	   processor TEXT,
-	   amount_in_cents INTEGER,
-	   created_at TIMESTAMP WITHOUT TIME ZONE
-   )`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_processor_created_at ON payments (processor, created_at)")
-	if err != nil {
-		return err
-	}
-	return nil
 }
