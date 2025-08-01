@@ -24,26 +24,31 @@ type PaymentsSummary struct {
 	FeePerTransaction float64 `json:"feePerTransaction"`
 }
 
+type Info struct {
+	IsAvailable     bool
+	MinResponseTime int
+}
+
 type PaymentProcessor struct {
-	Name        string
-	Client      PaymentClient
-	isAvailable bool
+	Name   string
+	Client PaymentClient
+	info   Info
 
 	mu sync.Mutex
 }
 
-func (pp *PaymentProcessor) setAvailable(available bool) {
+func (pp *PaymentProcessor) SetInfo(info Info) {
 	pp.mu.Lock()
 	defer pp.mu.Unlock()
 
-	pp.isAvailable = available
+	pp.info = info
 }
 
-func (pp *PaymentProcessor) IsAvailable() bool {
+func (pp *PaymentProcessor) GetInfo() Info {
 	pp.mu.Lock()
 	defer pp.mu.Unlock()
 
-	return pp.isAvailable
+	return pp.info
 }
 
 type PaymentClient interface {

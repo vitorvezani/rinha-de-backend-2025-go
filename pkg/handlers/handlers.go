@@ -109,7 +109,7 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 		paymentRequest := processor.Payment{CorrelationId: body.CorrelationId, Amount: body.Amount, RequestedAt: time.Now()}
 		var processorUsed string
 
-		if defaultProcessor.IsAvailable() {
+		if defaultProcessor.GetInfo().IsAvailable {
 			processorUsed = defaultProcessor.Name
 			_, err = defaultProcessor.Client.MakePayment(c.Request.Context(), paymentRequest)
 		} else {
@@ -117,7 +117,7 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 		}
 		if err != nil {
 			log.Println("error in default processor, falling back to fallback processor", err)
-			if fallbackProcessor.IsAvailable() {
+			if fallbackProcessor.GetInfo().IsAvailable {
 				processorUsed = fallbackProcessor.Name
 				_, err = fallbackProcessor.Client.MakePayment(c.Request.Context(), paymentRequest)
 				if err != nil {
@@ -192,7 +192,7 @@ func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, de
 		var err error
 
 		// Try default processor first (lower fees)
-		if defaultProcessor.IsAvailable() {
+		if defaultProcessor.GetInfo().IsAvailable {
 			processorUsed = defaultProcessor.Name
 			_, err = defaultProcessor.Client.MakePayment(context.Background(), paymentRequest)
 			if err == nil {
@@ -205,7 +205,7 @@ func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, de
 		}
 
 		// Try fallback processor
-		if fallbackProcessor.IsAvailable() {
+		if fallbackProcessor.GetInfo().IsAvailable {
 			processorUsed = fallbackProcessor.Name
 			_, err = fallbackProcessor.Client.MakePayment(context.Background(), paymentRequest)
 			if err == nil {
@@ -228,7 +228,7 @@ func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, de
 
 	// All retries exhausted
 	log.Printf("Payment %s failed after %d attempts - storing as failed", paymentRequest.CorrelationId, maxRetries)
-	storeFailedPayment(rdb, paymentRequest)
+	go processPaymentAsync(rdb, paymentRequest, defaultProcessor, fallbackProcessor)
 }
 
 func storePaymentResult(rdb *redis.Client, paymentRequest processor.Payment, processorUsed string) {
@@ -245,23 +245,6 @@ func storePaymentResult(rdb *redis.Client, paymentRequest processor.Payment, pro
 	err := rdb.HMSet(context.Background(), paymentKey, paymentData).Err()
 	if err != nil {
 		log.Printf("Error storing payment %s in Redis: %v", paymentRequest.CorrelationId, err)
-	}
-}
-
-func storeFailedPayment(rdb *redis.Client, paymentRequest processor.Payment) {
-	paymentKey := fmt.Sprintf("payment:%s", paymentRequest.CorrelationId)
-
-	paymentData := map[string]interface{}{
-		"correlation_id":  paymentRequest.CorrelationId,
-		"processor":       "none",
-		"amount_in_cents": paymentRequest.Amount * 100.0,
-		"created_at":      time.Now().Format(time.RFC3339),
-		"status":          "failed",
-	}
-
-	err := rdb.HMSet(context.Background(), paymentKey, paymentData).Err()
-	if err != nil {
-		log.Printf("Error storing failed payment %s in Redis: %v", paymentRequest.CorrelationId, err)
 	}
 }
 

@@ -27,9 +27,12 @@ func NewClient(baseURL string) PaymentClient {
 // NewClient constructs a PaymentClient
 func NewPaymentProcessor(name string, client PaymentClient) *PaymentProcessor {
 	return &PaymentProcessor{
-		Name:        name,
-		Client:      client,
-		isAvailable: true,
+		Name:   name,
+		Client: client,
+		info: Info{
+			IsAvailable:     true,
+			MinResponseTime: 0,
+		},
 	}
 }
 

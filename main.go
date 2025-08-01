@@ -58,7 +58,7 @@ func main() {
 	go processor.InstallPaymentProcessorWatcher(fallbackProcessor)
 
 	router := gin.Default()
-	router.POST("/payments", handlers.HandlePaymentProcessorAsync(rdb, defaultProcessor, fallbackProcessor))
+	router.POST("/payments", handlers.HandlePaymentProcessor(rdb, defaultProcessor, fallbackProcessor))
 	router.GET("/payments-summary", handlers.HandlePaymentsSummary(rdb))
 	router.POST("/purge-payments", handlers.HandlePurgePayments(rdb))
 	router.Run(":" + port)

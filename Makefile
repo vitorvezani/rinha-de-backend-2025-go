@@ -1,5 +1,5 @@
 # Variables
-IMAGE_NAME=ghcr.io/vitorvezani/rinha-backend-2025-go
+IMAGE_NAME=ghcr.io/vitorvezani/rinha-de-backend-2025-go
 DOCKER_COMPOSE=docker-compose
 
 # Build the Docker image

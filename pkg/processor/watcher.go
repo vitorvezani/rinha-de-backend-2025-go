@@ -19,7 +19,10 @@ func InstallPaymentProcessorWatcher(pp *PaymentProcessor) {
 			log.Println("could not get payment processor health for ", pp.Name)
 			continue
 		}
-		pp.setAvailable(!hr.Failing)
+		pp.SetInfo(Info{
+			IsAvailable:     !hr.Failing,
+			MinResponseTime: hr.MinResponseTime,
+		})
 		log.Println("pp ", pp.Name, " is ", !hr.Failing, " with min", hr.MinResponseTime)
 	}
 
