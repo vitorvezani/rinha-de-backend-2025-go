@@ -1,9 +1,9 @@
 services:
-  api: &api
+  api1: &api
     image: ghcr.io/vitorvezani/rinha-de-backend-2025-go:latest
     hostname: api
     environment:
-      - APP_PORT=9999
+      - APP_PORT=8080
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
       - WORKER_CONCURRENCY=16
@@ -20,24 +20,34 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: "350MB"
+          cpus: "0.55"
+          memory: "30MB"
 
   api2:
     <<: *api
     hostname: api2
 
   nginx:
-    image: nginx:latest
-    hostname: nginx
+    image: nginx:1.25-alpine
+    container_name: rinha-nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - api
+      - api1
       - api2
     ports:
-      - "9999:80"
+      - "9999:9999"
+    networks:
+      - backend
+      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: "15MB"
 
   postgres:
-    image: postgres:16
+    image: postgres:17-alpine
     hostname: postgres
     environment:
       POSTGRES_DB: rinha
