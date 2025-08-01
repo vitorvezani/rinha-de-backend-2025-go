@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -152,6 +153,115 @@ func HandlePaymentProcessor(rdb *redis.Client, defaultProcessor, fallbackProcess
 		c.JSON(200, gin.H{
 			"message": "Payment processed!",
 		})
+	}
+}
+
+func HandlePaymentProcessorAsync(rdb *redis.Client, defaultProcessor, fallbackProcessor *processor.PaymentProcessor) func(c *gin.Context) {
+	return func(c *gin.Context) {
+		var body processor.Payment
+		err := c.BindJSON(&body)
+		if err != nil {
+			log.Println("Error parsing body", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error parsing body"})
+			return
+		}
+
+		paymentRequest := processor.Payment{
+			CorrelationId: body.CorrelationId,
+			Amount:        body.Amount,
+			RequestedAt:   time.Now(),
+		}
+
+		// Return immediately to client
+		c.JSON(http.StatusAccepted, gin.H{
+			"message":       "Payment accepted for processing",
+			"correlationId": body.CorrelationId,
+		})
+
+		// Process payment asynchronously
+		go processPaymentAsync(rdb, paymentRequest, defaultProcessor, fallbackProcessor)
+	}
+}
+
+func processPaymentAsync(rdb *redis.Client, paymentRequest processor.Payment, defaultProcessor, fallbackProcessor *processor.PaymentProcessor) {
+	maxRetries := 5
+	retryDelay := time.Second * 2
+
+	for attempt := range maxRetries {
+		var processorUsed string
+		var err error
+
+		// Try default processor first (lower fees)
+		if defaultProcessor.IsAvailable() {
+			processorUsed = defaultProcessor.Name
+			_, err = defaultProcessor.Client.MakePayment(context.Background(), paymentRequest)
+			if err == nil {
+				// Success with default processor
+				storePaymentResult(rdb, paymentRequest, processorUsed)
+				log.Printf("Payment %s processed successfully with default processor", paymentRequest.CorrelationId)
+				return
+			}
+			log.Printf("Default processor failed for payment %s: %v", paymentRequest.CorrelationId, err)
+		}
+
+		// Try fallback processor
+		if fallbackProcessor.IsAvailable() {
+			processorUsed = fallbackProcessor.Name
+			_, err = fallbackProcessor.Client.MakePayment(context.Background(), paymentRequest)
+			if err == nil {
+				// Success with fallback processor
+				storePaymentResult(rdb, paymentRequest, processorUsed)
+				log.Printf("Payment %s processed successfully with fallback processor", paymentRequest.CorrelationId)
+				return
+			}
+			log.Printf("Fallback processor failed for payment %s: %v", paymentRequest.CorrelationId, err)
+		}
+
+		// Both processors failed, log and retry
+		log.Printf("Both processors failed for payment %s (attempt %d/%d)", paymentRequest.CorrelationId, attempt+1, maxRetries)
+
+		if attempt < maxRetries-1 {
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+		}
+	}
+
+	// All retries exhausted
+	log.Printf("Payment %s failed after %d attempts - storing as failed", paymentRequest.CorrelationId, maxRetries)
+	storeFailedPayment(rdb, paymentRequest)
+}
+
+func storePaymentResult(rdb *redis.Client, paymentRequest processor.Payment, processorUsed string) {
+	paymentKey := fmt.Sprintf("payment:%s", paymentRequest.CorrelationId)
+
+	paymentData := map[string]interface{}{
+		"correlation_id":  paymentRequest.CorrelationId,
+		"processor":       processorUsed,
+		"amount_in_cents": paymentRequest.Amount * 100.0,
+		"created_at":      time.Now().Format(time.RFC3339),
+		"status":          "completed",
+	}
+
+	err := rdb.HMSet(context.Background(), paymentKey, paymentData).Err()
+	if err != nil {
+		log.Printf("Error storing payment %s in Redis: %v", paymentRequest.CorrelationId, err)
+	}
+}
+
+func storeFailedPayment(rdb *redis.Client, paymentRequest processor.Payment) {
+	paymentKey := fmt.Sprintf("payment:%s", paymentRequest.CorrelationId)
+
+	paymentData := map[string]interface{}{
+		"correlation_id":  paymentRequest.CorrelationId,
+		"processor":       "none",
+		"amount_in_cents": paymentRequest.Amount * 100.0,
+		"created_at":      time.Now().Format(time.RFC3339),
+		"status":          "failed",
+	}
+
+	err := rdb.HMSet(context.Background(), paymentKey, paymentData).Err()
+	if err != nil {
+		log.Printf("Error storing failed payment %s in Redis: %v", paymentRequest.CorrelationId, err)
 	}
 }
 
